@@ -1,7 +1,7 @@
 "use client";
 
 import { Copy, Eye, Loader2, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Chain,
   createPublicClient,
@@ -30,9 +30,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { bigintReplacer, generateColorFromMethodId } from "@/lib/utils";
+import {
+  bigintReplacer,
+  functionSelectorToColor,
+  getRelativeTime,
+} from "@/lib/utils";
 import { chains } from "@/lib/wagmi";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 interface SourcifyResponse {
   status: string;
@@ -59,30 +76,10 @@ interface SourcifyVerification {
   }[];
 }
 
-const rtf = new Intl.RelativeTimeFormat("en", { style: "short" });
-
-function getRelativeTime(timestamp: number): string {
-  const now = Date.now();
-  const diff = timestamp * 1000 - now;
-  const diffHours = diff / (1000 * 60 * 60);
-
-  // If less than 24 hours old, show relative time
-  if (diffHours > -24) {
-    if (Math.abs(diffHours) < 1) {
-      const diffMinutes = diff / (1000 * 60);
-      if (Math.abs(diffMinutes) < 1) {
-        // Less than a minute, show seconds
-        return rtf.format(Math.round(diff / 1000), "second");
-      }
-      // Less than an hour, show minutes
-      return rtf.format(Math.round(diffMinutes), "minute");
-    }
-    // Otherwise show hours
-    return rtf.format(Math.round(diffHours), "hour");
-  }
-
-  // Otherwise show full date
-  return new Date(timestamp * 1000).toLocaleString();
+interface ContractSearchResult {
+  address: string;
+  name: string;
+  chainId: number;
 }
 
 async function fetchAbi(chainId: number, address: string): Promise<Abi> {
@@ -153,6 +150,11 @@ async function fetchAbi(chainId: number, address: string): Promise<Abi> {
   }
 }
 
+// Add a helper function to get chain name (add this outside the component)
+function getChainName(chainId: number) {
+  return chains.find((chain) => chain.id === chainId)?.name || "Unknown Chain";
+}
+
 export default function Page() {
   const [contractAddress, setContractAddress] = useState("");
   const [selectedChain, setSelectedChain] = useState<Chain | null>(null);
@@ -162,6 +164,11 @@ export default function Page() {
   const [inputs, setInputs] = useState<string[]>([]);
   const [encodedData, setEncodedData] = useState<string | null>(null);
   const [valueInput, setValueInput] = useState<string>("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState<string>("");
+  const [searchResults, setSearchResults] = useState<ContractSearchResult[]>(
+    []
+  );
 
   const {
     data: abi,
@@ -199,28 +206,31 @@ export default function Page() {
       : null;
   }, [selectedFunctionSelector, functions]);
 
-  const resolveEnsName = async (input: string, index: number) => {
-    if (!input || isAddress(input) || !input.toLowerCase().endsWith(".eth"))
-      return;
+  const resolveEnsName = useCallback(
+    async (input: string, index: number) => {
+      if (!input || isAddress(input) || !input.toLowerCase().endsWith(".eth"))
+        return;
 
-    const publicClient = createPublicClient({
-      chain: mainnet,
-      transport: http(),
-    });
-
-    try {
-      const resolved = await publicClient.getEnsAddress({
-        name: input,
+      const publicClient = createPublicClient({
+        chain: mainnet,
+        transport: http(),
       });
-      if (resolved) {
-        handleInputChange(index, resolved);
-      }
-    } catch (error) {
-      console.error("Error resolving ENS name:", error);
-    }
-  };
 
-  const viewFunctionMutation = useMutation({
+      try {
+        const resolved = await publicClient.getEnsAddress({
+          name: input,
+        });
+        if (resolved) {
+          handleInputChange(index, resolved);
+        }
+      } catch (error) {
+        console.error("Error resolving ENS name:", error);
+      }
+    },
+    [handleInputChange]
+  );
+
+  const readContractMutation = useMutation({
     mutationFn: async (): Promise<any | null> => {
       if (
         !selectedFunctionSelector ||
@@ -314,6 +324,59 @@ export default function Page() {
     }
   }, [availableChains]);
 
+  useEffect(() => {
+    setSelectedFunctionSelector(null);
+    setInputs([]);
+    setEncodedData(null);
+  }, [contractAddress]);
+
+  const { data: txList, isLoading: isLoadingTxList } = useQuery({
+    queryKey: ["transactions", selectedChain?.id, contractAddress],
+    queryFn: async () => {
+      if (!selectedChain?.id || !contractAddress) return null;
+      const response = await fetch(
+        `/api/etherscan?chainid=${selectedChain.id}&module=account&action=txlist&address=${contractAddress}&sort=desc&limit=100`
+      );
+      const data = await response.json();
+      return data.result;
+    },
+    enabled: isAddress(contractAddress) && !!selectedChain,
+  });
+
+  const filteredTransactions = useMemo(() => {
+    if (!txList) return [];
+    return txList
+      .filter((tx: any) => {
+        if (!selectedFunctionSelector) return true;
+        if (!functions.length) return false;
+        const selectedFunc = functions.find(
+          (f) => toFunctionSelector(f) === selectedFunctionSelector
+        );
+        if (selectedFunc?.stateMutability === "view") return true;
+        return tx.methodId === selectedFunctionSelector.slice(0, 10);
+      })
+      .slice(0, 50);
+  }, [txList, selectedFunctionSelector, functions]);
+
+  const handleTransactionClick = useCallback(
+    (tx: any) => {
+      const f = functions.find((f) => toFunctionSelector(f) === tx.methodId);
+      if (!f) return;
+
+      setSelectedFunctionSelector(toFunctionSelector(f));
+      try {
+        const decoded = decodeFunctionData({
+          abi: [f],
+          data: tx.input,
+        });
+        setInputs(decoded.args.map((v: any) => v.toString()));
+      } catch (error) {
+        console.error("Error decoding transaction data:", error);
+      }
+    },
+    [functions]
+  );
+
   const scaleInput = (index: number, value: string, magnitude: number) => {
     try {
       const floatValue = parseFloat(value);
@@ -363,32 +426,36 @@ export default function Page() {
     }
   };
 
-  const { data: txList, isLoading: isLoadingTxList } = useQuery({
-    queryKey: ["transactions", selectedChain?.id, contractAddress],
-    queryFn: async () => {
-      if (!selectedChain?.id || !contractAddress) return null;
-      const response = await fetch(
-        `/api/etherscan?chainid=${selectedChain.id}&module=account&action=txlist&address=${contractAddress}&sort=desc&limit=100`
-      );
-      const data = await response.json();
-      return data.result;
-    },
-    enabled: isAddress(contractAddress) && !!selectedChain,
-  });
+  // Effect to handle contract search
+  useEffect(() => {
+    if (!searchInput || searchInput.length < 2) {
+      setSearchResults([]);
+      return;
+    }
 
-  const filteredTransactions = useMemo(() => {
-    if (!txList) return [];
-    return txList
-      .filter((tx: any) => {
-        if (!selectedFunctionSelector) return true;
-        const selectedFunc = functions.find(
-          (f) => toFunctionSelector(f) === selectedFunctionSelector
+    const controller = new AbortController();
+    const timeoutId = setTimeout(async () => {
+      try {
+        const response = await fetch(
+          `/api/search-contracts?q=${encodeURIComponent(searchInput)}`,
+          { signal: controller.signal }
         );
-        if (selectedFunc?.stateMutability === "view") return true;
-        return tx.methodId === selectedFunctionSelector.slice(0, 10);
-      })
-      .slice(0, 50);
-  }, [txList, selectedFunctionSelector, functions]);
+        if (response.ok) {
+          const data = await response.json();
+          setSearchResults(data);
+        }
+      } catch (error) {
+        if (error instanceof Error && error.name !== "AbortError") {
+          console.error("Search failed:", error);
+        }
+      }
+    }, 300); // Debounce searches
+
+    return () => {
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
+  }, [searchInput]);
 
   return (
     <div className="p-10 mx-auto">
@@ -400,12 +467,100 @@ export default function Page() {
           <CardContent className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="contractAddress">Contract Address</Label>
-              <Input
-                id="contractAddress"
-                value={contractAddress}
-                onChange={(e) => setContractAddress(e.target.value)}
-                placeholder="0x..."
-              />
+              <div className="flex gap-2">
+                <Popover open={searchOpen} onOpenChange={setSearchOpen}>
+                  <PopoverTrigger asChild>
+                    <Input
+                      id="contractAddress"
+                      value={contractAddress}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setContractAddress(value);
+                        if (!isAddress(value)) {
+                          setSearchInput(value);
+                          setSearchOpen(true);
+                        } else {
+                          setSearchOpen(false);
+                        }
+                      }}
+                      placeholder="Search by name or address..."
+                      className="text-left"
+                    />
+                  </PopoverTrigger>
+                  <PopoverContent
+                    className="p-0 w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-content-available-width)]"
+                    align="start"
+                  >
+                    <Command
+                      className="rounded-lg shadow-md"
+                      shouldFilter={false}
+                    >
+                      <CommandInput
+                        placeholder="Search contracts..."
+                        value={searchInput}
+                        onValueChange={(value) => {
+                          setContractAddress(value);
+                          if (!isAddress(value)) {
+                            setSearchInput(value);
+                            setSearchOpen(true);
+                          } else {
+                            setSearchOpen(false);
+                          }
+                        }}
+                      />
+                      <CommandList>
+                        <CommandEmpty>
+                          {searchInput === ""
+                            ? "Start typing to search contracts..."
+                            : "No contracts found."}
+                        </CommandEmpty>
+                        <CommandGroup>
+                          {searchResults.map((result) => (
+                            <CommandItem
+                              key={`${result.address}-${result.chainId}`}
+                              value={result.address}
+                              onSelect={() => {
+                                setContractAddress(result.address);
+                                setSearchOpen(false);
+                              }}
+                              className={
+                                contractAddress.toLowerCase() ===
+                                result.address.toLowerCase()
+                                  ? "bg-gray-100"
+                                  : ""
+                              }
+                            >
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">
+                                    {result.name}
+                                  </span>
+                                  <span className="text-xs px-2 py-0.5 bg-gray-100 rounded-full">
+                                    {getChainName(result.chainId)}
+                                  </span>
+                                </div>
+                                <span className="text-sm text-gray-500">
+                                  {result.address}
+                                </span>
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => navigator.clipboard.writeText(contractAddress)}
+                  disabled={!isAddress(contractAddress)}
+                  title="Copy address"
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
 
             {isLoadingVerification && (
@@ -585,10 +740,10 @@ export default function Page() {
 
                     {selectedFunction.stateMutability === "view" ? (
                       <Button
-                        onClick={() => viewFunctionMutation.mutate()}
-                        disabled={viewFunctionMutation.isPending}
+                        onClick={() => readContractMutation.mutate()}
+                        disabled={readContractMutation.isPending}
                       >
-                        {viewFunctionMutation.isPending ? (
+                        {readContractMutation.isPending ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             Reading...
@@ -603,17 +758,17 @@ export default function Page() {
 
                     {selectedFunction.stateMutability === "view" ? (
                       <div>
-                        {viewFunctionMutation.error && (
+                        {readContractMutation.error && (
                           <div className="text-sm text-destructive">
-                            Error: {viewFunctionMutation.error.message}
+                            Error: {readContractMutation.error.message}
                           </div>
                         )}
-                        {!!viewFunctionMutation.data && (
+                        {!!readContractMutation.data && (
                           <div className="space-y-2">
                             <Label>Result:</Label>
                             <pre className="p-4 bg-muted rounded-md overflow-x-auto">
                               {JSON.stringify(
-                                viewFunctionMutation.data,
+                                readContractMutation.data,
                                 bigintReplacer,
                                 2
                               )}
@@ -672,27 +827,13 @@ export default function Page() {
                       <div
                         key={tx.hash}
                         className="p-4 rounded-lg border cursor-pointer hover:bg-muted"
-                        onClick={() => {
-                          const f = functions.find(
-                            (f) => toFunctionSelector(f) === tx.methodId
-                          );
-                          if (f) {
-                            setSelectedFunctionSelector(toFunctionSelector(f));
-                            const decoded = decodeFunctionData({
-                              abi: [f],
-                              data: tx.input,
-                            });
-                            setInputs(
-                              decoded.args.map((v: any) => v.toString())
-                            );
-                          }
-                        }}
+                        onClick={() => handleTransactionClick(tx)}
                       >
                         <div className="font-medium flex items-center gap-2">
                           <div
                             className="w-3 h-3 rounded-full"
                             style={{
-                              backgroundColor: generateColorFromMethodId(
+                              backgroundColor: functionSelectorToColor(
                                 tx.methodId
                               ),
                             }}

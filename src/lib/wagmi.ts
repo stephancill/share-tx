@@ -6,6 +6,14 @@ import { getTransportByChainId } from "./utils";
 
 export const chains = [base, optimism, arbitrum, polygon, mainnet] as const;
 
+export const blockscoutUrlByChainId = {
+  [base.id]: "https://base.blockscout.com",
+  [optimism.id]: "https://optimism.blockscout.com",
+  [arbitrum.id]: "https://arbitrum.blockscout.com",
+  [polygon.id]: "https://polygon.blockscout.com",
+  [mainnet.id]: "https://eth.blockscout.com",
+};
+
 const transports = Object.fromEntries(
   chains.map((chain) => [chain.id, getTransportByChainId(chain.id)])
 ) as { [K in (typeof chains)[number]["id"]]: HttpTransport };
