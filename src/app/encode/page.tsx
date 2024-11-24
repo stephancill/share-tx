@@ -8,6 +8,7 @@ import {
   decodeFunctionData,
   encodeFunctionData,
   getAddress,
+  hexToNumber,
   http,
   isAddress,
   parseAbi,
@@ -20,8 +21,21 @@ import { mainnet } from "viem/chains";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -37,19 +51,6 @@ import {
 } from "@/lib/utils";
 import { chains } from "@/lib/wagmi";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 
 interface SourcifyResponse {
   status: string;
@@ -121,7 +122,6 @@ async function fetchAbi(chainId: number, address: string): Promise<Abi> {
     console.error("Error fetching ABI:", error);
   }
 
-  // Fetch ABI from Sourcify
   const response = await fetch(
     `https://sourcify.dev/server/files/any/${chainId}/${normalizedAddress}`,
     {
@@ -150,7 +150,18 @@ async function fetchAbi(chainId: number, address: string): Promise<Abi> {
   }
 }
 
-// Add a helper function to get chain name (add this outside the component)
+function scaleMagnitude(value: string, magnitude: number) {
+  const floatValue = value.startsWith("0x")
+    ? hexToNumber(value as `0x${string}`)
+    : parseFloat(value);
+  if (isNaN(floatValue)) throw new Error("Invalid number");
+  const scale = magnitude;
+  const scaledValue = Math.round(floatValue * Math.pow(10, scale)).toString();
+  const bigIntValue = BigInt(scaledValue);
+
+  return bigIntValue;
+}
+
 function getChainName(chainId: number) {
   return chains.find((chain) => chain.id === chainId)?.name || "Unknown Chain";
 }
@@ -161,8 +172,8 @@ export default function Page() {
   const [selectedFunctionSelector, setSelectedFunctionSelector] = useState<
     string | null
   >(null);
+
   const [inputs, setInputs] = useState<string[]>([]);
-  const [encodedData, setEncodedData] = useState<string | null>(null);
   const [valueInput, setValueInput] = useState<string>("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchInput, setSearchInput] = useState<string>("");
@@ -205,6 +216,29 @@ export default function Page() {
         )
       : null;
   }, [selectedFunctionSelector, functions]);
+
+  const encodedData = useMemo(() => {
+    if (!selectedFunction || !inputs) return null;
+
+    if (
+      selectedFunction.stateMutability === "view" ||
+      selectedFunction.stateMutability === "pure"
+    )
+      return null;
+
+    if (selectedFunction.inputs.length !== inputs.length) return null;
+
+    try {
+      return encodeFunctionData({
+        abi: [selectedFunction],
+        functionName: selectedFunction.name,
+        args: inputs,
+      });
+    } catch (error) {
+      console.error("Error encoding function data:", error);
+      return null;
+    }
+  }, [selectedFunction, inputs]);
 
   const resolveEnsName = useCallback(
     async (input: string, index: number) => {
@@ -327,7 +361,6 @@ export default function Page() {
   useEffect(() => {
     setSelectedFunctionSelector(null);
     setInputs([]);
-    setEncodedData(null);
   }, [contractAddress]);
 
   const { data: txList, isLoading: isLoadingTxList } = useQuery({
@@ -370,6 +403,10 @@ export default function Page() {
           data: tx.input,
         });
         setInputs(decoded.args.map((v: any) => v.toString()));
+
+        if (f.stateMutability === "payable" && tx.value !== "0") {
+          setValueInput(tx.value);
+        }
       } catch (error) {
         console.error("Error decoding transaction data:", error);
       }
@@ -379,54 +416,22 @@ export default function Page() {
 
   const scaleInput = (index: number, value: string, magnitude: number) => {
     try {
-      const floatValue = parseFloat(value);
-      if (isNaN(floatValue)) throw new Error("Invalid number");
-      const scale = magnitude;
-      const scaledValue = Math.round(
-        floatValue * Math.pow(10, scale)
-      ).toString();
-      const bigIntValue = BigInt(scaledValue);
+      const bigIntValue = scaleMagnitude(value, magnitude);
       handleInputChange(index, bigIntValue.toString());
     } catch (error) {
       console.error("Error scaling input:", error);
     }
   };
 
-  const handleEncode = () => {
-    if (!selectedFunctionSelector || !inputs) return;
-
-    const f = functions.find(
-      (f) => toFunctionSelector(f) === selectedFunctionSelector
-    );
-
-    if (!f) return;
-
+  const scaleValueInput = (value: string) => {
     try {
-      const encoded = encodeFunctionData({
-        abi: [f],
-        functionName: f.name,
-        args: inputs,
-      });
-      setEncodedData(encoded);
-    } catch (error) {
-      console.error("Encoding error:", error);
-      setEncodedData(null);
-    }
-  };
-
-  const scaleValue = (value: string) => {
-    try {
-      const floatValue = parseFloat(value);
-      if (isNaN(floatValue)) throw new Error("Invalid number");
-      const scaledValue = Math.round(floatValue * 1e18).toString();
-      const bigIntValue = BigInt(scaledValue);
+      const bigIntValue = scaleMagnitude(value, 18);
       setValueInput(bigIntValue.toString());
     } catch (error) {
       console.error("Error scaling value:", error);
     }
   };
 
-  // Effect to handle contract search
   useEffect(() => {
     if (!searchInput || searchInput.length < 2) {
       setSearchResults([]);
@@ -449,13 +454,27 @@ export default function Page() {
           console.error("Search failed:", error);
         }
       }
-    }, 300); // Debounce searches
+    }, 300);
 
     return () => {
       controller.abort();
       clearTimeout(timeoutId);
     };
   }, [searchInput]);
+
+  const handleShare = useCallback(() => {
+    if (!selectedChain || !contractAddress || !encodedData) return;
+
+    const params = new URLSearchParams({
+      chainId: selectedChain.id.toString(),
+      data: encodedData,
+      to: contractAddress,
+      value: valueInput || "0",
+    });
+
+    const url = `${window.location.origin}/tx?${params.toString()}`;
+    navigator.clipboard.writeText(url);
+  }, [selectedChain, contractAddress, encodedData, valueInput]);
 
   return (
     <div className="p-10 mx-auto">
@@ -551,15 +570,19 @@ export default function Page() {
                   </PopoverContent>
                 </Popover>
 
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => navigator.clipboard.writeText(contractAddress)}
-                  disabled={!isAddress(contractAddress)}
-                  title="Copy address"
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
+                {isAddress(contractAddress) && (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() =>
+                      navigator.clipboard.writeText(contractAddress)
+                    }
+                    disabled={!isAddress(contractAddress)}
+                    title="Copy address"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -651,7 +674,6 @@ export default function Page() {
                       onClick={() => {
                         setSelectedFunctionSelector(null);
                         setInputs([]);
-                        setEncodedData(null);
                       }}
                     >
                       Reset
@@ -667,7 +689,7 @@ export default function Page() {
 
                     {selectedFunction.stateMutability === "payable" && (
                       <div className="space-y-2">
-                        <Label htmlFor="value-input">Value (in ETH)</Label>
+                        <Label htmlFor="value-input">value (payable)</Label>
                         <div className="flex space-x-2">
                           <Input
                             id="value-input"
@@ -678,7 +700,7 @@ export default function Page() {
                           />
                           <Button
                             variant="outline"
-                            onClick={() => scaleValue(valueInput)}
+                            onClick={() => scaleValueInput(valueInput)}
                             disabled={!valueInput}
                             title="Scale by 18 decimals"
                           >
@@ -738,6 +760,27 @@ export default function Page() {
                       )
                     )}
 
+                    {encodedData && (
+                      <div className="space-y-2">
+                        <Label>Encoded Data:</Label>
+                        <div className="relative">
+                          <pre className="p-4 bg-muted rounded-md border whitespace-pre-wrap break-all">
+                            {encodedData}
+                          </pre>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="absolute top-2 right-2"
+                            onClick={() =>
+                              navigator.clipboard.writeText(encodedData)
+                            }
+                          >
+                            <Copy size={16} />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
                     {selectedFunction.stateMutability === "view" ? (
                       <Button
                         onClick={() => readContractMutation.mutate()}
@@ -753,10 +796,15 @@ export default function Page() {
                         )}
                       </Button>
                     ) : (
-                      <Button onClick={handleEncode}>Encode</Button>
+                      <div>
+                        <Button onClick={handleShare} disabled={!encodedData}>
+                          <Copy className="mr-2 h-4 w-4" />
+                          Share
+                        </Button>
+                      </div>
                     )}
 
-                    {selectedFunction.stateMutability === "view" ? (
+                    {selectedFunction.stateMutability === "view" && (
                       <div>
                         {readContractMutation.error && (
                           <div className="text-sm text-destructive">
@@ -776,27 +824,6 @@ export default function Page() {
                           </div>
                         )}
                       </div>
-                    ) : (
-                      encodedData && (
-                        <div className="space-y-2">
-                          <Label>Encoded Data:</Label>
-                          <div className="relative">
-                            <pre className="p-4 bg-muted rounded-md border whitespace-pre-wrap break-all">
-                              {encodedData}
-                            </pre>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="absolute top-2 right-2"
-                              onClick={() =>
-                                navigator.clipboard.writeText(encodedData)
-                              }
-                            >
-                              <Copy size={16} />
-                            </Button>
-                          </div>
-                        </div>
-                      )
                     )}
                   </div>
                 )}
