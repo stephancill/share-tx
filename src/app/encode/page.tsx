@@ -4,10 +4,8 @@ import { Copy, Eye, Loader2, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Address,
-  createPublicClient,
   decodeFunctionData,
   encodeFunctionData,
-  http,
   isAddress,
   toFunctionSelector,
   type AbiFunction,
@@ -51,6 +49,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useAbi } from "@/hooks/useAbi";
 import { SupportedChain, SupportedChainId } from "@/types";
 import { useSourcify } from "@/hooks/useSourcify";
+import { usePublicClient } from "wagmi";
 
 interface ContractSearchResult {
   address: Address;
@@ -59,6 +58,8 @@ interface ContractSearchResult {
 }
 
 export default function Page() {
+  const publicClient = usePublicClient();
+  const mainnetClient = usePublicClient({ chainId: mainnet.id });
   const [contractAddress, setContractAddress] = useState("");
   const [selectedChain, setSelectedChain] = useState<SupportedChain | null>(
     null
@@ -136,13 +137,8 @@ export default function Page() {
       if (!input || isAddress(input) || !input.toLowerCase().endsWith(".eth"))
         return;
 
-      const publicClient = createPublicClient({
-        chain: mainnet,
-        transport: http(),
-      });
-
       try {
-        const resolved = await publicClient.getEnsAddress({
+        const resolved = await mainnetClient.getEnsAddress({
           name: input,
         });
         if (resolved) {
@@ -165,11 +161,6 @@ export default function Page() {
       )
         return null;
 
-      const publicClient = createPublicClient({
-        chain: selectedChain,
-        transport: http(),
-      });
-
       const f = functions.find(
         (f) => toFunctionSelector(f) === selectedFunctionSelector
       );
@@ -189,11 +180,6 @@ export default function Page() {
     queryKey: ["decimals", selectedChain?.id, contractAddress],
     queryFn: async () => {
       if (!selectedChain || !contractAddress) return null;
-
-      const publicClient = createPublicClient({
-        chain: selectedChain,
-        transport: http(),
-      });
 
       try {
         const result = await publicClient.readContract({
