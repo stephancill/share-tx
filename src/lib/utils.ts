@@ -46,6 +46,10 @@ export function getRelativeTime(timestamp: number): string {
 }
 
 export function getTransportByChainId(chainId: number) {
+  return http();
+
+  // TODO: implement this
+
   const url = process.env[`NEXT_PUBLIC_EVM_RPC_URL_${chainId}`];
   if (url) {
     return http(url);
