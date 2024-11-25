@@ -3,18 +3,13 @@
 import { Copy, Eye, Loader2, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Chain,
   createPublicClient,
   decodeFunctionData,
   encodeFunctionData,
-  getAddress,
   hexToNumber,
   http,
   isAddress,
-  parseAbi,
   toFunctionSelector,
-  zeroAddress,
-  type Abi,
   type AbiFunction,
 } from "viem";
 import { mainnet } from "viem/chains";
@@ -51,23 +46,8 @@ import {
 } from "@/lib/utils";
 import { chains } from "@/lib/wagmi";
 import { useMutation, useQuery } from "@tanstack/react-query";
-
-interface SourcifyResponse {
-  status: string;
-  files: {
-    name: string;
-    path: string;
-    content: string;
-  }[];
-}
-
-interface CompilerOutput {
-  abi: Abi;
-}
-
-interface MetadataJson {
-  output: CompilerOutput;
-}
+import { useAbi } from "@/hooks/useAbi";
+import { SupportedChain } from "@/types";
 
 interface SourcifyVerification {
   address: string;
@@ -81,73 +61,6 @@ interface ContractSearchResult {
   address: string;
   name: string;
   chainId: number;
-}
-
-async function fetchAbi(chainId: number, address: string): Promise<Abi> {
-  let normalizedAddress = address.toLowerCase();
-
-  const publicClient = createPublicClient({
-    chain: chains.find((c) => c.id === chainId),
-    transport: http(),
-  });
-
-  try {
-    const [implementationAddress, implementationSlot] = await Promise.all([
-      publicClient
-        .readContract({
-          address: normalizedAddress as `0x${string}`,
-          abi: parseAbi(["function implementation() view returns (address)"]),
-          functionName: "implementation",
-        })
-        .catch(() => null),
-      publicClient
-        .getStorageAt({
-          address: normalizedAddress as `0x${string}`,
-          // https://eips.ethereum.org/EIPS/eip-1967
-          slot: "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
-        })
-        .catch(() => null),
-    ]);
-
-    if (implementationAddress) {
-      normalizedAddress = getAddress(implementationAddress);
-    } else if (implementationSlot) {
-      // Convert bytes32 to address by taking the last 20 bytes
-      const addressFromSlot = getAddress(`0x${implementationSlot.slice(-40)}`);
-      if (addressFromSlot !== zeroAddress) {
-        normalizedAddress = addressFromSlot;
-      }
-    }
-  } catch (error) {
-    console.error("Error fetching ABI:", error);
-  }
-
-  const response = await fetch(
-    `https://sourcify.dev/server/files/any/${chainId}/${normalizedAddress}`,
-    {
-      headers: {
-        accept: "application/json",
-      },
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error("Contract not found on Sourcify");
-  }
-
-  const data = (await response.json()) as SourcifyResponse;
-
-  const metadataFile = data.files.find((file) => file.name === "metadata.json");
-  if (!metadataFile) {
-    throw new Error("Metadata file not found");
-  }
-
-  try {
-    const metadata = JSON.parse(metadataFile.content) as MetadataJson;
-    return metadata.output.abi;
-  } catch (error) {
-    throw new Error("Failed to parse contract metadata");
-  }
 }
 
 function scaleMagnitude(value: string, magnitude: number) {
@@ -168,7 +81,9 @@ function getChainName(chainId: number) {
 
 export default function Page() {
   const [contractAddress, setContractAddress] = useState("");
-  const [selectedChain, setSelectedChain] = useState<Chain | null>(null);
+  const [selectedChain, setSelectedChain] = useState<SupportedChain | null>(
+    null
+  );
   const [selectedFunctionSelector, setSelectedFunctionSelector] = useState<
     string | null
   >(null);
@@ -185,12 +100,9 @@ export default function Page() {
     data: abi,
     isLoading: isLoadingAbi,
     error: abiError,
-  } = useQuery({
-    queryKey: ["abi", selectedChain?.id, contractAddress],
-    queryFn: () =>
-      selectedChain ? fetchAbi(selectedChain.id, contractAddress) : null,
-    enabled: isAddress(contractAddress) && !!selectedChain,
-    staleTime: Infinity,
+  } = useAbi({
+    chainId: selectedChain?.id,
+    address: contractAddress,
   });
 
   const handleInputChange = useMemo(() => {
