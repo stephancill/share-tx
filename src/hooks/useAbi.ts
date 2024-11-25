@@ -16,14 +16,13 @@ export function useAbi({
   address,
 }: {
   chainId?: SupportedChainId;
-  address: string;
+  address?: string;
 }) {
-  // Idk why `as PublicClient` is needed, but seems to work as expected
   const client = usePublicClient({ chainId }) as PublicClient;
 
   return useQuery({
     queryKey: ["abi", chainId, address],
-    enabled: isAddress(address),
+    enabled: !!address && isAddress(address),
     queryFn: () => {
       if (!chainId || !address || !isAddress(address)) return null;
       return fetchAbi(client, chainId, address);
@@ -48,7 +47,7 @@ interface MetadataJson {
 
 async function fetchAbi(
   publicClient: PublicClient,
-  chainId: SupportedChainId,
+  chainId: number,
   address: Address
 ): Promise<Abi> {
   let normalizedAddress = address.toLowerCase();

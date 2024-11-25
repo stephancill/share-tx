@@ -13,6 +13,7 @@ import {
 } from "viem";
 import { mainnet } from "viem/chains";
 import { usePublicClient } from "wagmi";
+import { debounce } from "lodash";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,6 +57,7 @@ interface ContractSearchResult {
   address: Address;
   name: string;
   chainId: SupportedChainId;
+  transactionCount: number;
 }
 
 export default function Page() {
@@ -73,9 +75,26 @@ export default function Page() {
   const [valueInput, setValueInput] = useState<string>("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchInput, setSearchInput] = useState<string>("");
-  const [searchResults, setSearchResults] = useState<ContractSearchResult[]>(
-    []
-  );
+  const [debouncedSearchInput, setDebouncedSearchInput] = useState<string>("");
+
+  const { data: searchResults = [], isLoading: isLoadingSearch } = useQuery({
+    queryKey: ["contract-search", debouncedSearchInput],
+    queryFn: async () => {
+      if (!debouncedSearchInput || debouncedSearchInput.length < 2) return [];
+
+      const response = await fetch(
+        `/api/search-contracts?q=${encodeURIComponent(debouncedSearchInput)}`
+      );
+      if (!response.ok) {
+        throw new Error("Search failed");
+      }
+
+      const results: ContractSearchResult[] = await response.json();
+
+      return results;
+    },
+    enabled: debouncedSearchInput.length >= 2,
+  });
 
   const {
     data: abi,
@@ -207,6 +226,18 @@ export default function Page() {
     setInputs([]);
   }, [contractAddress]);
 
+  useEffect(() => {
+    const debouncedSetSearch = debounce((value: string) => {
+      setDebouncedSearchInput(value);
+    }, 300);
+
+    debouncedSetSearch(searchInput);
+
+    return () => {
+      debouncedSetSearch.cancel();
+    };
+  }, [searchInput]);
+
   const { data: txList, isLoading: isLoadingTxList } = useQuery({
     queryKey: ["transactions", selectedChain?.id, contractAddress],
     queryFn: async () => {
@@ -276,36 +307,6 @@ export default function Page() {
     }
   };
 
-  useEffect(() => {
-    if (!searchInput || searchInput.length < 2) {
-      setSearchResults([]);
-      return;
-    }
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(async () => {
-      try {
-        const response = await fetch(
-          `/api/search-contracts?q=${encodeURIComponent(searchInput)}`,
-          { signal: controller.signal }
-        );
-        if (response.ok) {
-          const data = await response.json();
-          setSearchResults(data);
-        }
-      } catch (error) {
-        if (error instanceof Error && error.name !== "AbortError") {
-          console.error("Search failed:", error);
-        }
-      }
-    }, 300);
-
-    return () => {
-      controller.abort();
-      clearTimeout(timeoutId);
-    };
-  }, [searchInput]);
-
   const handleShare = useCallback(() => {
     if (!selectedChain || !contractAddress || !encodedData) return;
 
@@ -373,9 +374,16 @@ export default function Page() {
                       />
                       <CommandList>
                         <CommandEmpty>
-                          {searchInput === ""
-                            ? "Start typing to search contracts..."
-                            : "No contracts found."}
+                          {isLoadingSearch ? (
+                            <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Searching...
+                            </div>
+                          ) : searchInput === "" ? (
+                            "Start typing to search contracts..."
+                          ) : (
+                            "No contracts found."
+                          )}
                         </CommandEmpty>
                         <CommandGroup>
                           {searchResults.map((result) => (
@@ -400,6 +408,10 @@ export default function Page() {
                                   </span>
                                   <span className="text-xs px-2 py-0.5 bg-gray-100 rounded-full">
                                     {getChainName(result.chainId)}
+                                  </span>
+                                  <span className="text-xs text-gray-500">
+                                    {result.transactionCount.toLocaleString()}{" "}
+                                    txns
                                   </span>
                                 </div>
                                 <span className="text-sm text-gray-500">

@@ -4,11 +4,14 @@ import { SupportedChainId } from "@/types";
 
 interface BlockscoutSearchResult {
   items: Array<{
-    address: string;
-    name: string;
-    symbol: string;
-    type: string;
-    is_smart_contract_verified: boolean;
+    address: {
+      hash: string;
+      name: string;
+      is_contract: boolean;
+      is_verified: boolean;
+    };
+    language: string;
+    transaction_count: number;
   }>;
 }
 
@@ -16,6 +19,7 @@ interface NormalizedSearchResult {
   address: string;
   name: string;
   chainId: SupportedChainId;
+  transactionCount: number;
 }
 
 export async function GET(request: NextRequest) {
@@ -25,14 +29,14 @@ export async function GET(request: NextRequest) {
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2000);
+  const timeout = setTimeout(() => controller.abort(), 10000);
 
   try {
     const searchPromises = chains.map(async (chain) => {
       const baseUrl = blockscoutUrlByChainId[chain.id];
       try {
         const response = await fetch(
-          `${baseUrl}/api/v2/search?q=${encodeURIComponent(searchQuery)}`,
+          `${baseUrl}/api/v2/smart-contracts?q=${encodeURIComponent(searchQuery)}`,
           { signal: controller.signal }
         );
 
@@ -41,14 +45,14 @@ export async function GET(request: NextRequest) {
         const data: BlockscoutSearchResult = await response.json();
 
         return data.items
-          .filter((item) => item.type === "token" || item.type === "contract")
+          .filter((item) => item.address.is_contract)
           .map((item) => ({
-            address: item.address,
-            name: item.name || item.symbol || "Unknown",
+            address: item.address.hash,
+            name: item.address.name || "Unknown",
             chainId: chain.id,
+            transactionCount: item.transaction_count || 0,
           }));
       } catch (error) {
-        // Ignore individual chain errors and timeouts
         console.warn(`Search failed for chain ${chain.id}`);
         return [];
       }
@@ -62,7 +66,8 @@ export async function GET(request: NextRequest) {
           result.status === "fulfilled"
       )
       .map((result) => result.value)
-      .flat();
+      .flat()
+      .sort((a, b) => b.transactionCount - a.transactionCount);
 
     return Response.json(flattenedResults);
   } finally {
