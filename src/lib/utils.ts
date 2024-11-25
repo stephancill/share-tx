@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { http, toHex } from "viem";
+import { hexToNumber, http, toHex } from "viem";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { SupportedChainId } from "@/types";
+import { chains } from "./wagmi";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -116,4 +118,20 @@ export function createProxyRequestHandler(
       return new NextResponse("Internal Server Error", { status: 500 });
     }
   };
+}
+
+export function scaleMagnitude(value: string, magnitude: number) {
+  const floatValue = value.startsWith("0x")
+    ? hexToNumber(value as `0x${string}`)
+    : parseFloat(value);
+  if (isNaN(floatValue)) throw new Error("Invalid number");
+  const scale = magnitude;
+  const scaledValue = Math.round(floatValue * Math.pow(10, scale)).toString();
+  const bigIntValue = BigInt(scaledValue);
+
+  return bigIntValue;
+}
+
+export function getChainName(chainId: SupportedChainId) {
+  return chains.find((chain) => chain.id === chainId)?.name || "Unknown Chain";
 }

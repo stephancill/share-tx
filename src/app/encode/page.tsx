@@ -3,10 +3,10 @@
 import { Copy, Eye, Loader2, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Address,
   createPublicClient,
   decodeFunctionData,
   encodeFunctionData,
-  hexToNumber,
   http,
   isAddress,
   toFunctionSelector,
@@ -42,41 +42,20 @@ import {
 import {
   bigintReplacer,
   functionSelectorToColor,
+  getChainName,
   getRelativeTime,
+  scaleMagnitude,
 } from "@/lib/utils";
 import { chains } from "@/lib/wagmi";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useAbi } from "@/hooks/useAbi";
-import { SupportedChain } from "@/types";
-
-interface SourcifyVerification {
-  address: string;
-  chainIds: {
-    chainId: string;
-    status: "perfect" | "partial";
-  }[];
-}
+import { SupportedChain, SupportedChainId } from "@/types";
+import { useSourcify } from "@/hooks/useSourcify";
 
 interface ContractSearchResult {
-  address: string;
+  address: Address;
   name: string;
-  chainId: number;
-}
-
-function scaleMagnitude(value: string, magnitude: number) {
-  const floatValue = value.startsWith("0x")
-    ? hexToNumber(value as `0x${string}`)
-    : parseFloat(value);
-  if (isNaN(floatValue)) throw new Error("Invalid number");
-  const scale = magnitude;
-  const scaledValue = Math.round(floatValue * Math.pow(10, scale)).toString();
-  const bigIntValue = BigInt(scaledValue);
-
-  return bigIntValue;
-}
-
-function getChainName(chainId: number) {
-  return chains.find((chain) => chain.id === chainId)?.name || "Unknown Chain";
+  chainId: SupportedChainId;
 }
 
 export default function Page() {
@@ -238,20 +217,8 @@ export default function Page() {
     enabled: isAddress(contractAddress) && !!selectedChain,
   });
 
-  const { data: verification, isLoading: isLoadingVerification } = useQuery({
-    queryKey: ["verification", contractAddress],
-    queryFn: async () => {
-      const response = await fetch(
-        `https://sourcify.dev/server/check-all-by-addresses?addresses=${contractAddress}&chainIds=${chains.map((c) => c.id).join(",")}`,
-        {
-          headers: { accept: "application/json" },
-        }
-      );
-      const [verifications] = (await response.json()) as SourcifyVerification[];
-      return verifications;
-    },
-    enabled: isAddress(contractAddress),
-  });
+  const { data: verification, isLoading: isLoadingVerification } =
+    useSourcify(contractAddress);
 
   const availableChains = useMemo(() => {
     if (!verification) return verification;
