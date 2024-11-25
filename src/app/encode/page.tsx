@@ -676,7 +676,7 @@ export default function Page() {
                             Error: {readContractMutation.error.message}
                           </div>
                         )}
-                        {!!readContractMutation.data && (
+                        {readContractMutation.data !== undefined && (
                           <div className="space-y-2">
                             <Label>Result:</Label>
                             <pre className="p-4 bg-muted rounded-md overflow-x-auto">
