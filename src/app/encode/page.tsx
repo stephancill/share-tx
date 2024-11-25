@@ -1,16 +1,18 @@
 "use client";
 
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Copy, Eye, Loader2, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  type AbiFunction,
   Address,
   decodeFunctionData,
   encodeFunctionData,
   isAddress,
   toFunctionSelector,
-  type AbiFunction,
 } from "viem";
 import { mainnet } from "viem/chains";
+import { usePublicClient } from "wagmi";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,6 +39,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAbi } from "@/hooks/useAbi";
+import { useDecimals } from "@/hooks/useDecimals";
+import { useSourcify } from "@/hooks/useSourcify";
 import {
   bigintReplacer,
   functionSelectorToColor,
@@ -45,12 +50,7 @@ import {
   scaleMagnitude,
 } from "@/lib/utils";
 import { chains } from "@/lib/wagmi";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useAbi } from "@/hooks/useAbi";
 import { SupportedChain, SupportedChainId } from "@/types";
-import { useSourcify } from "@/hooks/useSourcify";
-import { usePublicClient } from "wagmi";
-import { useDecimals } from "@/hooks/useDecimals";
 
 interface ContractSearchResult {
   address: Address;

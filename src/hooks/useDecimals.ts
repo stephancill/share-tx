@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { isAddress } from "viem";
+import { usePublicClient } from "wagmi";
 
 import { SupportedChainId } from "@/types";
-import { usePublicClient } from "wagmi";
 
 export function useDecimals({
   chainId,

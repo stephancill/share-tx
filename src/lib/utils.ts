@@ -1,8 +1,10 @@
+import { type ClassValue, clsx } from "clsx";
 import { NextRequest, NextResponse } from "next/server";
-import { hexToNumber, http, toHex } from "viem";
-import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { hexToNumber, http, toHex } from "viem";
+
 import { SupportedChainId } from "@/types";
+
 import { chains } from "./wagmi";
 
 export function cn(...inputs: ClassValue[]) {

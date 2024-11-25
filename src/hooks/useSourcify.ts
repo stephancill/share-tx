@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { isAddress } from "viem";
+
 import { chains } from "@/lib/wagmi";
 
 interface SourcifyVerification {

@@ -1,14 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { isAddress, parseAbi } from "viem";
-import { usePublicClient } from "wagmi";
-import { chains } from "@/lib/wagmi";
 import {
-  getAddress,
-  zeroAddress,
   type Abi,
   type Address,
   type PublicClient,
+  getAddress,
+  zeroAddress,
 } from "viem";
+import { usePublicClient } from "wagmi";
+
 import { SupportedChainId } from "@/types";
 
 export function useAbi({

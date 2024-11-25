@@ -2,8 +2,10 @@ import { HttpTransport } from "viem";
 import { cookieStorage, createConfig, createStorage } from "wagmi";
 import { arbitrum, base, mainnet, optimism, polygon } from "wagmi/chains";
 import { coinbaseWallet, injected, walletConnect } from "wagmi/connectors";
-import { getTransportByChainId } from "./utils";
+
 import { SupportedChainId } from "@/types";
+
+import { getTransportByChainId } from "./utils";
 
 export const chains = [base, optimism, arbitrum, polygon, mainnet] as const;
 
