@@ -16,7 +16,7 @@ export function useAbi({
   address,
 }: {
   chainId?: SupportedChainId;
-  address?: string;
+  address: string;
 }) {
   // Idk why `as PublicClient` is needed, but seems to work as expected
   const client = usePublicClient({ chainId }) as PublicClient;

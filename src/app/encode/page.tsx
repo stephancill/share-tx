@@ -50,6 +50,7 @@ import { useAbi } from "@/hooks/useAbi";
 import { SupportedChain, SupportedChainId } from "@/types";
 import { useSourcify } from "@/hooks/useSourcify";
 import { usePublicClient } from "wagmi";
+import { useDecimals } from "@/hooks/useDecimals";
 
 interface ContractSearchResult {
   address: Address;
@@ -176,31 +177,9 @@ export default function Page() {
     },
   });
 
-  const { data: decimals } = useQuery({
-    queryKey: ["decimals", selectedChain?.id, contractAddress],
-    queryFn: async () => {
-      if (!selectedChain || !contractAddress) return null;
-
-      try {
-        const result = await publicClient.readContract({
-          address: contractAddress as `0x${string}`,
-          abi: [
-            {
-              inputs: [],
-              name: "decimals",
-              outputs: [{ type: "uint8", name: "" }],
-              stateMutability: "view",
-              type: "function",
-            },
-          ],
-          functionName: "decimals",
-        });
-        return Number(result);
-      } catch {
-        return null;
-      }
-    },
-    enabled: isAddress(contractAddress) && !!selectedChain,
+  const { data: decimals } = useDecimals({
+    chainId: selectedChain?.id,
+    address: contractAddress,
   });
 
   const { data: verification, isLoading: isLoadingVerification } =
