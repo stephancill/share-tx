@@ -13,6 +13,7 @@ interface SourcifyVerification {
 export function useSourcify(contractAddress: string) {
   return useQuery({
     queryKey: ["verification", contractAddress],
+    enabled: isAddress(contractAddress),
     queryFn: async () => {
       if (!isAddress(contractAddress)) return null;
 

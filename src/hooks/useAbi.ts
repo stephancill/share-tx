@@ -23,6 +23,7 @@ export function useAbi({
 
   return useQuery({
     queryKey: ["abi", chainId, address],
+    enabled: isAddress(address),
     queryFn: () => {
       if (!chainId || !address || !isAddress(address)) return null;
       return fetchAbi(client, chainId, address);
