@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { blockscoutUrlByChainId, chains } from "@/lib/wagmi";
+import { SupportedChainId } from "@/types";
 
 interface BlockscoutSearchResult {
   items: Array<{
@@ -14,7 +15,7 @@ interface BlockscoutSearchResult {
 interface NormalizedSearchResult {
   address: string;
   name: string;
-  chainId: (typeof chains)[number]["id"];
+  chainId: SupportedChainId;
 }
 
 export async function GET(request: NextRequest) {

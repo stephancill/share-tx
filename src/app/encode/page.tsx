@@ -1,23 +1,18 @@
 "use client";
 
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Copy, Eye, Loader2, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Chain,
-  createPublicClient,
+  type AbiFunction,
+  Address,
   decodeFunctionData,
   encodeFunctionData,
-  getAddress,
-  hexToNumber,
-  http,
   isAddress,
-  parseAbi,
   toFunctionSelector,
-  zeroAddress,
-  type Abi,
-  type AbiFunction,
 } from "viem";
 import { mainnet } from "viem/chains";
+import { usePublicClient } from "wagmi";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,131 +39,32 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAbi } from "@/hooks/useAbi";
+import { useDecimals } from "@/hooks/useDecimals";
+import { useSourcify } from "@/hooks/useSourcify";
 import {
   bigintReplacer,
   functionSelectorToColor,
+  getChainName,
   getRelativeTime,
+  scaleMagnitude,
 } from "@/lib/utils";
 import { chains } from "@/lib/wagmi";
-import { useMutation, useQuery } from "@tanstack/react-query";
-
-interface SourcifyResponse {
-  status: string;
-  files: {
-    name: string;
-    path: string;
-    content: string;
-  }[];
-}
-
-interface CompilerOutput {
-  abi: Abi;
-}
-
-interface MetadataJson {
-  output: CompilerOutput;
-}
-
-interface SourcifyVerification {
-  address: string;
-  chainIds: {
-    chainId: string;
-    status: "perfect" | "partial";
-  }[];
-}
+import { SupportedChain, SupportedChainId } from "@/types";
 
 interface ContractSearchResult {
-  address: string;
+  address: Address;
   name: string;
-  chainId: number;
-}
-
-async function fetchAbi(chainId: number, address: string): Promise<Abi> {
-  let normalizedAddress = address.toLowerCase();
-
-  const publicClient = createPublicClient({
-    chain: chains.find((c) => c.id === chainId),
-    transport: http(),
-  });
-
-  try {
-    const [implementationAddress, implementationSlot] = await Promise.all([
-      publicClient
-        .readContract({
-          address: normalizedAddress as `0x${string}`,
-          abi: parseAbi(["function implementation() view returns (address)"]),
-          functionName: "implementation",
-        })
-        .catch(() => null),
-      publicClient
-        .getStorageAt({
-          address: normalizedAddress as `0x${string}`,
-          // https://eips.ethereum.org/EIPS/eip-1967
-          slot: "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
-        })
-        .catch(() => null),
-    ]);
-
-    if (implementationAddress) {
-      normalizedAddress = getAddress(implementationAddress);
-    } else if (implementationSlot) {
-      // Convert bytes32 to address by taking the last 20 bytes
-      const addressFromSlot = getAddress(`0x${implementationSlot.slice(-40)}`);
-      if (addressFromSlot !== zeroAddress) {
-        normalizedAddress = addressFromSlot;
-      }
-    }
-  } catch (error) {
-    console.error("Error fetching ABI:", error);
-  }
-
-  const response = await fetch(
-    `https://sourcify.dev/server/files/any/${chainId}/${normalizedAddress}`,
-    {
-      headers: {
-        accept: "application/json",
-      },
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error("Contract not found on Sourcify");
-  }
-
-  const data = (await response.json()) as SourcifyResponse;
-
-  const metadataFile = data.files.find((file) => file.name === "metadata.json");
-  if (!metadataFile) {
-    throw new Error("Metadata file not found");
-  }
-
-  try {
-    const metadata = JSON.parse(metadataFile.content) as MetadataJson;
-    return metadata.output.abi;
-  } catch (error) {
-    throw new Error("Failed to parse contract metadata");
-  }
-}
-
-function scaleMagnitude(value: string, magnitude: number) {
-  const floatValue = value.startsWith("0x")
-    ? hexToNumber(value as `0x${string}`)
-    : parseFloat(value);
-  if (isNaN(floatValue)) throw new Error("Invalid number");
-  const scale = magnitude;
-  const scaledValue = Math.round(floatValue * Math.pow(10, scale)).toString();
-  const bigIntValue = BigInt(scaledValue);
-
-  return bigIntValue;
-}
-
-function getChainName(chainId: number) {
-  return chains.find((chain) => chain.id === chainId)?.name || "Unknown Chain";
+  chainId: SupportedChainId;
 }
 
 export default function Page() {
+  const publicClient = usePublicClient();
+  const mainnetClient = usePublicClient({ chainId: mainnet.id });
   const [contractAddress, setContractAddress] = useState("");
-  const [selectedChain, setSelectedChain] = useState<Chain | null>(null);
+  const [selectedChain, setSelectedChain] = useState<SupportedChain | null>(
+    null
+  );
   const [selectedFunctionSelector, setSelectedFunctionSelector] = useState<
     string | null
   >(null);
@@ -185,12 +81,9 @@ export default function Page() {
     data: abi,
     isLoading: isLoadingAbi,
     error: abiError,
-  } = useQuery({
-    queryKey: ["abi", selectedChain?.id, contractAddress],
-    queryFn: () =>
-      selectedChain ? fetchAbi(selectedChain.id, contractAddress) : null,
-    enabled: isAddress(contractAddress) && !!selectedChain,
-    staleTime: Infinity,
+  } = useAbi({
+    chainId: selectedChain?.id,
+    address: contractAddress,
   });
 
   const handleInputChange = useMemo(() => {
@@ -245,13 +138,8 @@ export default function Page() {
       if (!input || isAddress(input) || !input.toLowerCase().endsWith(".eth"))
         return;
 
-      const publicClient = createPublicClient({
-        chain: mainnet,
-        transport: http(),
-      });
-
       try {
-        const resolved = await publicClient.getEnsAddress({
+        const resolved = await mainnetClient.getEnsAddress({
           name: input,
         });
         if (resolved) {
@@ -274,11 +162,6 @@ export default function Page() {
       )
         return null;
 
-      const publicClient = createPublicClient({
-        chain: selectedChain,
-        transport: http(),
-      });
-
       const f = functions.find(
         (f) => toFunctionSelector(f) === selectedFunctionSelector
       );
@@ -294,52 +177,13 @@ export default function Page() {
     },
   });
 
-  const { data: decimals } = useQuery({
-    queryKey: ["decimals", selectedChain?.id, contractAddress],
-    queryFn: async () => {
-      if (!selectedChain || !contractAddress) return null;
-
-      const publicClient = createPublicClient({
-        chain: selectedChain,
-        transport: http(),
-      });
-
-      try {
-        const result = await publicClient.readContract({
-          address: contractAddress as `0x${string}`,
-          abi: [
-            {
-              inputs: [],
-              name: "decimals",
-              outputs: [{ type: "uint8", name: "" }],
-              stateMutability: "view",
-              type: "function",
-            },
-          ],
-          functionName: "decimals",
-        });
-        return Number(result);
-      } catch {
-        return null;
-      }
-    },
-    enabled: isAddress(contractAddress) && !!selectedChain,
+  const { data: decimals } = useDecimals({
+    chainId: selectedChain?.id,
+    address: contractAddress,
   });
 
-  const { data: verification, isLoading: isLoadingVerification } = useQuery({
-    queryKey: ["verification", contractAddress],
-    queryFn: async () => {
-      const response = await fetch(
-        `https://sourcify.dev/server/check-all-by-addresses?addresses=${contractAddress}&chainIds=${chains.map((c) => c.id).join(",")}`,
-        {
-          headers: { accept: "application/json" },
-        }
-      );
-      const [verifications] = (await response.json()) as SourcifyVerification[];
-      return verifications;
-    },
-    enabled: isAddress(contractAddress),
-  });
+  const { data: verification, isLoading: isLoadingVerification } =
+    useSourcify(contractAddress);
 
   const availableChains = useMemo(() => {
     if (!verification) return verification;
@@ -811,7 +655,7 @@ export default function Page() {
                             Error: {readContractMutation.error.message}
                           </div>
                         )}
-                        {!!readContractMutation.data && (
+                        {readContractMutation.data !== undefined && (
                           <div className="space-y-2">
                             <Label>Result:</Label>
                             <pre className="p-4 bg-muted rounded-md overflow-x-auto">

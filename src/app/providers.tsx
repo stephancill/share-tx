@@ -4,8 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode, useState } from "react";
 import { type State, WagmiProvider } from "wagmi";
 
-import { getConfig } from "@/lib/wagmi";
 import { Toaster } from "@/components/ui/toaster";
+import { getConfig } from "@/lib/wagmi";
 
 export function Providers(props: {
   children: ReactNode;
